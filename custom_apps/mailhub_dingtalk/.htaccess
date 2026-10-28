@@ -1,0 +1,9 @@
+# Only frontend assets are served directly. PHP controllers are reached through
+# Nextcloud's authenticated index.php router, never through these source paths.
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteRule ^(?:tests|cli|lib|templates|appinfo)(?:/|$) - [R=404,L]
+</IfModule>
+<FilesMatch "\.(?:php|phtml|phar)$">
+    Require all denied
+</FilesMatch>
