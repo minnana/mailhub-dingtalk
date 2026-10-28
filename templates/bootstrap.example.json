@@ -1,0 +1,19 @@
+{
+  "domain": "mailhub.example.com",
+  "public_port": 18443,
+  "bind_address": "0.0.0.0",
+  "admin_user": "mailhub-admin",
+  "acme_email": "",
+  "proxy_subnet": "172.30.240.0/24",
+  "backend_subnet": "172.30.241.0/24",
+  "dns_provider": "dns_acmedns",
+  "mail_dns_primary": "119.29.29.29",
+  "mail_dns_secondary": "223.5.5.5",
+  "app_memory_mb": 4096,
+  "app_cpus": 2.0,
+  "db_memory_mb": 1536,
+  "db_buffer_pool_mb": 512,
+  "db_cpus": 1.0,
+  "cron_memory_mb": 1536,
+  "cron_cpus": 1.0
+}

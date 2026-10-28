@@ -1,0 +1,32 @@
+<?php
+$CONFIG = [
+    'apps_paths' => [
+        ['path' => '/var/www/html/apps', 'url' => '/apps', 'writable' => false],
+        ['path' => '/var/www/html/custom_apps', 'url' => '/custom_apps', 'writable' => true],
+    ],
+    'upgrade.disable-web' => true,
+    'debug' => false,
+    'trusted_domains' => ['@@DOMAIN@@', '@@DOMAIN@@:@@PUBLIC_PORT@@'],
+    'trusted_proxies' => ['@@PROXY_IP@@'],
+    'overwritehost' => '@@DOMAIN@@:@@PUBLIC_PORT@@',
+    'overwriteprotocol' => 'https',
+    'overwrite.cli.url' => 'https://@@DOMAIN@@:@@PUBLIC_PORT@@',
+    'forwarded_for_headers' => ['HTTP_X_FORWARDED_FOR'],
+    'default_phone_region' => 'CN',
+    'default_language' => 'zh_CN',
+    'defaultapp' => 'mail',
+    'loglevel' => 2,
+    'log_rotate_size' => 104857600,
+    'profiler' => false,
+    'logtimezone' => 'Asia/Shanghai',
+    'maintenance_window_start' => 18,
+    'memcache.local' => '\\OC\\Memcache\\APCu',
+    'memcache.locking' => '\\OC\\Memcache\\Redis',
+    'memcache.distributed' => '\\OC\\Memcache\\Redis',
+    'redis' => ['host' => 'redis', 'port' => 6379, 'timeout' => 1.5],
+    'app.mail.background-sync-interval' => 60,
+    // Mail 5.12.5 clamps the native interval to 300. Our version-checked
+    // CLI bootstrap adjusts its cached job through public setInterval().
+    'app.mailhub.fast-sync-enabled' => true,
+    'app.mail.verify-tls-peer' => true,
+];

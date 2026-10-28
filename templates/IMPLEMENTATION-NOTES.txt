@@ -1,0 +1,85 @@
+Implementation notes for maintainers (2026-10-27)
+
+Scope: Ubuntu 24.04 shared-host deployment. A separate mailhub_dingtalk plugin is
+mounted read-only; integration works only after corporate credentials and an
+explicit user access policy are configured and acceptance-tested.
+
+Version provenance, queried directly from official current metadata:
+- https://hub.docker.com/v2/repositories/library/nextcloud/tags/34.0.5-apache
+- https://api.github.com/repos/nextcloud-releases/mail/releases/latest
+- https://github.com/nextcloud-releases/mail/releases/tag/v5.12.5
+- https://raw.githubusercontent.com/nextcloud/mail/v5.12.5/appinfo/info.xml
+  Mail 5.12.5 declares Nextcloud 32..35 and PHP 8.1..8.5 support.
+- https://hub.docker.com/v2/repositories/library/mariadb/tags/11.4
+- https://hub.docker.com/v2/repositories/library/redis/tags/7.4-alpine
+- https://hub.docker.com/v2/repositories/library/nginx/tags/stable-alpine
+- https://hub.docker.com/v2/repositories/neilpang/acme.sh/tags/3.1.6
+Container manifest-list digests and Mail release SHA256 are in versions.env.
+Tags are readable labels; image digests are the immutable selectors. Docker
+Engine comes from the official Ubuntu repository and is not version-frozen.
+The package does not contain container images, mailbox data or actual secrets.
+
+Credential paths are generated on the target VM, never shipped in this kit.
+Source is /opt/mailhub; /opt/mailhub/runtime is root-only and contains state and
+credentials. Bootstrap validates JSON, existing Docker and networks but never
+installs software, changes existing applications, restarts Docker or changes
+global firewall/daemon configuration. Compose file-backed secrets retain mode600.
+Nextcloud's PHP installer reads passwords as root, then drops to UID/GID33 and
+passes them in PHP memory to its console. No secret goes in OS command arguments.
+The application persists database credentials in its own config.php as expected.
+The ACME DNS plugin necessarily saves encrypted-transport API credentials in
+plain text in its root-only account configuration; protect data/acme in backups.
+
+Network: backend is Docker-internal and contains only DB/Redis/app/cron.
+Frontend allows app/cron egress to external IMAP/SMTP/HTTPS. No app, DB or Redis
+host ports are published. Only nginx publishes the chosen high port (18443).
+Dynamic frontend addresses come from the upper /25, leaving the proxy's fixed
+.2 address outside the dynamic pool even when app/cron start before nginx.
+Nginx is fixed at PROXY_IP; Nextcloud trusts only this proxy address. Apache's
+default broad private-network RemoteIP rewriting is disabled. Root firewall
+must still control the published Docker port; Docker can bypass plain UFW rules.
+No script flushes firewall rules or exposes SSH, database, Redis or port80.
+Both nginx and Apache request access logs are disabled to keep OAuth callback
+query strings out of those logs. Error/application logs still need restricted
+access. Docker local logs rotate at 10 MiB x3/service; Nextcloud's application
+log rotates at 100 MiB (with the previous rotated file retained).
+
+Canonical URL always contains the SAME nondefault port inside/outside the office.
+Split DNS changes only the IP, never domain or port. Certificates bind the DNS
+name, not the port. Public TCP forwarding must map 18443 to VM18443 by default.
+DNS-01 supports dns_tencent (Tencent_SecretId/Tencent_SecretKey), dns_dp
+(DP_Id/DP_Key), or dns_acmedns (ACMEDNS_BASE_URL/USERNAME/PASSWORD/SUBDOMAIN).
+The selected provider's values are read from runtime/secrets/dns.env only. The
+acme-dns provider requires all four pre-registered fields; scripts never invoke
+its implicit registration flow. CNAME delegation is configured separately by
+the operator. ACME registration email may be omitted; no address is fabricated.
+https://raw.githubusercontent.com/acmesh-official/acme.sh/3.1.6/dnsapi/dns_tencent.sh
+https://letsencrypt.org/docs/challenge-types/#dns-01-challenge
+
+Background cron uses the pinned official image's BusyBox daemon with a dedicated
+one-minute schedule. Mail 5.12.5 enforces a native 300-second floor, so the plugin
+uses a version-checked CLI bootstrap to set the shared native sync job interval
+to 1 second so execution-order drift cannot skip a one-minute cron round.
+The pinned Nextcloud CronService deduplicates task IDs within each round and
+retains native job locks; the scheduler still starts only once per minute.
+The sync target is 60 seconds. Each cycle runs the official cron.php then an
+extra notification scan, with no default digest delay; a shared data-directory
+flock serializes the normal notification job and post-sync runner. This is a
+single-host deployment and not a cross-host HA lock. This is not a 60-second
+end-to-end notification SLA or a push/IDLE daemon. Measure backlog with
+representative accounts; a running cron line is not started again.
+
+All mutating scripts share /run/lock/mailhub-maintenance.lock. Bootstrap refuses
+unmanaged nonempty destinations and retains generated credentials on retry.
+The app healthcheck waits for Apache, which starts after image initialization;
+the PHP installer additionally waits for the image's initialization file lock.
+The pre-mounted managed config prevents the official entrypoint from seeding its
+default config skeleton. The managed config therefore explicitly includes both
+official apps_paths, disables web core upgrades, and sets APCu/Redis/proxy config.
+start.sh installs only the checksum-pinned Mail tarball and refuses a different
+already-installed Mail version. Updates require explicit reviewed version pins.
+Backup format v2 includes source + runtime and a logical database dump, excludes
+raw database files and .git, and restores only into an empty installation.
+
+See docs/VALIDATION.md for the dated live-deployment and automated-test record.
+It distinguishes verified paths from remaining production acceptance work.

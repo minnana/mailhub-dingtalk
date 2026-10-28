@@ -1,0 +1,10 @@
+{
+  "enabled": false,
+  "corp_id": "",
+  "client_id": "",
+  "client_secret": "",
+  "agent_id": "",
+  "allowed_userids": [],
+  "allow_all_corporate_users": false,
+  "notifications_enabled": false
+}
