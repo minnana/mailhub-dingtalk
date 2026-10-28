@@ -1,0 +1,171 @@
+name: mailhub
+
+x-logging: &logging
+  driver: local
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+x-nextcloud: &nextcloud
+  image: ${NEXTCLOUD_IMAGE:?Run bootstrap first}
+  restart: unless-stopped
+  logging: *logging
+  dns:
+    - ${MAIL_DNS_PRIMARY:-119.29.29.29}
+    - ${MAIL_DNS_SECONDARY:-223.5.5.5}
+  dns_opt: ["timeout:2", "attempts:2"]
+  environment:
+    PHP_MEMORY_LIMIT: 512M
+    PHP_UPLOAD_LIMIT: 64M
+    APACHE_BODY_LIMIT: 67108864
+    APACHE_DISABLE_REWRITE_IP: "1"
+    MAILHUB_DINGTALK_CONFIG: /run/secrets/mailhub_dingtalk.json
+  volumes:
+    - ./runtime/data/nextcloud:/var/www/html
+    - ./runtime/config/mailhub.config.php:/var/www/html/config/mailhub.config.php:ro
+    - ./templates/install.php:/mailhub/install.php:ro
+    - ./templates/apache-mailhub.conf:/etc/apache2/sites-enabled/000-default.conf:ro
+    - ./custom_apps/mailhub_dingtalk:/var/www/html/custom_apps/mailhub_dingtalk:ro
+    - ./runtime/secrets/dingtalk.json:/run/secrets/mailhub_dingtalk.json:ro
+  networks:
+    - backend
+    - frontend
+
+services:
+  db:
+    image: ${MARIADB_IMAGE:?Run bootstrap first}
+    restart: unless-stopped
+    logging: *logging
+    command: ["--transaction-isolation=READ-COMMITTED", "--binlog-format=ROW", "--innodb-buffer-pool-size=${DB_BUFFER_POOL_MB:-512}M"]
+    mem_limit: ${DB_MEMORY_MB:-1536}m
+    cpus: ${DB_CPUS:-1.0}
+    environment:
+      MARIADB_DATABASE: nextcloud
+      MARIADB_USER: nextcloud
+      MARIADB_PASSWORD_FILE: /run/secrets/db_password
+      MARIADB_ROOT_PASSWORD_FILE: /run/secrets/db_root_password
+    secrets: [db_password, db_root_password]
+    volumes:
+      - ./runtime/data/database:/var/lib/mysql
+    networks: [backend]
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+  redis:
+    image: ${REDIS_IMAGE:?Run bootstrap first}
+    restart: unless-stopped
+    logging: *logging
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "256mb", "--maxmemory-policy", "noeviction"]
+    mem_limit: 512m
+    cpus: 0.5
+    networks: [backend]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+  app:
+    <<: *nextcloud
+    secrets: [db_password, admin_password]
+    mem_limit: ${APP_MEMORY_MB:-4096}m
+    cpus: ${APP_CPUS:-2.0}
+    depends_on:
+      db: {condition: service_healthy}
+      redis: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "php", "-r", "exit(@fsockopen('127.0.0.1', 80) === false ? 1 : 0);"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+  cron:
+    <<: *nextcloud
+    entrypoint: ["/bin/sh", "/mailhub/cron-minute.sh"]
+    configs:
+      - source: cron_minute_entrypoint
+        target: /mailhub/cron-minute.sh
+      - source: cron_cycle
+        target: /mailhub/cron-cycle.sh
+    mem_limit: ${CRON_MEMORY_MB:-1536}m
+    cpus: ${CRON_CPUS:-1.0}
+    depends_on:
+      app: {condition: service_healthy}
+  nginx:
+    image: ${NGINX_IMAGE:?Run bootstrap first}
+    restart: unless-stopped
+    logging: *logging
+    entrypoint: ["nginx"]
+    command: ["-g", "daemon off;"]
+    read_only: true
+    mem_limit: 256m
+    cpus: 0.5
+    ulimits:
+      nofile:
+        soft: 8192
+        hard: 8192
+    ports:
+      - "${BIND_ADDRESS:-0.0.0.0}:${PUBLIC_PORT:-18443}:8443"
+    volumes:
+      - ./runtime/config/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./runtime/data/certs:/etc/nginx/certs:ro
+    tmpfs:
+      - /var/cache/nginx
+      - /var/run
+      - /tmp
+    networks:
+      frontend:
+        ipv4_address: ${PROXY_IP:-172.30.240.2}
+    depends_on:
+      app: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+  acme:
+    profiles: [cert]
+    image: ${ACME_IMAGE:?Run bootstrap first}
+    logging: *logging
+    user: "0:0"
+    entrypoint: ["/bin/sh", "/mailhub/acme-entrypoint.sh"]
+    environment:
+      AUTO_UPGRADE: "0"
+    secrets: [dns]
+    mem_limit: 256m
+    cpus: 0.5
+    volumes:
+      - ./runtime/data/acme:/acme.sh
+      - ./runtime/data/certs:/certs
+      - ./templates/acme-entrypoint.sh:/mailhub/acme-entrypoint.sh:ro
+    networks: [frontend]
+
+configs:
+  cron_minute_entrypoint:
+    file: ./templates/cron-minute.sh
+  cron_cycle:
+    file: ./templates/cron-cycle.sh
+
+secrets:
+  db_password:
+    file: ./runtime/secrets/db_password
+  db_root_password:
+    file: ./runtime/secrets/db_root_password
+  admin_password:
+    file: ./runtime/secrets/admin_password
+  dns:
+    file: ./runtime/secrets/dns.env
+
+networks:
+  backend:
+    internal: true
+    ipam:
+      config:
+        - subnet: ${BACKEND_SUBNET:-172.30.241.0/24}
+  frontend:
+    ipam:
+      config:
+        - subnet: ${PROXY_SUBNET:-172.30.240.0/24}
+          ip_range: ${PROXY_DYNAMIC_RANGE:-172.30.240.128/25}

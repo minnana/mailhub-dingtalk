@@ -1,0 +1,16 @@
+Mailhub DingTalk mail workspace
+
+The original deployment scripts and configuration templates in this package
+are provided under the MIT license in LICENSE. Nextcloud, Nextcloud Mail,
+MariaDB, Redis, nginx, acme.sh, Docker and other third-party software retain
+their own respective licenses. They are fetched from their official sources
+and are not relicensed by this package.
+
+The custom Nextcloud application under custom_apps/mailhub_dingtalk is
+licensed under AGPL-3.0-or-later. See that directory's LICENSE file.
+The root MIT license does not relicense that application or third-party code.
+
+No software images, account credentials or mailbox content are bundled.
+DingTalk SSO and personal notification integration are provided as source.
+Deployment and unit tests do not establish real-device/provider compatibility;
+see docs/VALIDATION.md for the actual acceptance boundary.
